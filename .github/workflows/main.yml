@@ -63,24 +63,25 @@ jobs:
         run: python3 scripts/build_web_content.py --no-progress
         
       - name: Build browser project
-        run: dotnet publish src/CutTheRopeDX.Browser/CutTheRopeDX.Browser.csproj -c Release -o ./dist
+        run: dotnet publish src/CutTheRopeDX.Browser/CutTheRopeDX.Browser.csproj -c Release
         
       - name: Run unit tests
-        run: dotnet test --solution CutTheRopeDX.slnx -p:ExcludeMacOSTarget=true --no-build || echo "No test projects found, skipping tests"
+        run: dotnet test --solution CutTheRopeDX.slnx -p:ExcludeMacOSTarget=true --no-build
+        continue-on-error: true
         
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: web-build
-          path: dist/wwwroot/
+          path: src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot/
           retention-days: 7
           
       - name: Check build output
         run: |
-          if [ -d "dist/wwwroot" ]; then
+          if [ -d "src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot" ]; then
             echo "✓ Web build output directory exists"
-            ls -lah dist/wwwroot/ | head -20
+            ls -lah src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot/ | head -20
           else
             echo "✗ Web build output directory not found"
             exit 1
