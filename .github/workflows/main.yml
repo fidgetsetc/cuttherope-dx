@@ -1,0 +1,158 @@
+name: Build Web Version
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+            
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pillow fonttools
+          
+      - name: Install WebAssembly workload
+        run: dotnet workload install wasm-tools
+        
+      - name: Restore NuGet packages for content builder
+        run: dotnet restore content/Builder/CutTheRopeDX.Content.csproj
+        
+      - name: Build web content (convert assets)
+        run: python3 scripts/build_web_content.py --no-progress
+        
+      - name: Build browser project
+        run: dotnet publish src/CutTheRopeDX.Browser/CutTheRopeDX.Browser.csproj -c Release -o ./dist
+        
+      - name: Run unit tests
+        run: dotnet test --solution CutTheRopeDX.slnx -p:ExcludeMacOSTarget=true --no-build
+        
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-build
+          path: dist/wwwroot/
+          retention-days: 7
+          
+      - name: Check build output
+        run: |
+          if [ -d "dist/wwwroot" ]; then
+            echo "✓ Web build output directory exists"
+            ls -lah dist/wwwroot/ | head -20
+          else
+            echo "✗ Web build output directory not found"
+            exit 1
+          fi
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: ./web-build
+          
+      - name: Create release zip
+        run: |
+          cd web-build
+          zip -r ../cuttherope-dx-web.zip .
+          cd ..
+          ls -lh cuttherope-dx-web.zip
+          
+      - name: Get commit short hash
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: cuttherope-dx-web.zip
+          tag_name: web-build-${{ github.run_number }}
+          name: Web Build ${{ github.run_number }} (${{ steps.vars.outputs.sha_short }})
+          body: |
+            Automated web build from commit ${{ steps.vars.outputs.sha_short }}
+            
+            Contains the WebAssembly build ready to serve.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    permissions:
+      pages: write
+      id-token: write
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: ./
+          
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+        
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+          
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
