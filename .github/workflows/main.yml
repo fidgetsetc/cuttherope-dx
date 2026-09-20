@@ -63,7 +63,20 @@ jobs:
         run: python3 scripts/build_web_content.py --no-progress
         
       - name: Build browser project
-        run: dotnet publish src/CutTheRopeDX.Browser/CutTheRopeDX.Browser.csproj -c Release
+        run: dotnet publish src/CutTheRopeDX.Browser/CutTheRopeDX.Browser.csproj -c Release -o ./web-publish
+        
+      - name: Find wwwroot directory
+        run: |
+          find ./web-publish -type d -name "wwwroot" -exec ls -lah {} \;
+          WEB_ROOT=$(find ./web-publish -type d -name "wwwroot" | head -1)
+          if [ -z "$WEB_ROOT" ]; then
+            echo "wwwroot not found, listing publish directory:"
+            ls -lah ./web-publish/
+            exit 1
+          else
+            echo "Found wwwroot at: $WEB_ROOT"
+            ls -lah "$WEB_ROOT" | head -20
+          fi
         
       - name: Run unit tests
         run: dotnet test --solution CutTheRopeDX.slnx -p:ExcludeMacOSTarget=true --no-build
@@ -74,14 +87,17 @@ jobs:
         if: always()
         with:
           name: web-build
-          path: src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot/
+          path: |
+            web-publish/**/wwwroot/
           retention-days: 7
           
       - name: Check build output
         run: |
-          if [ -d "src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot" ]; then
-            echo "✓ Web build output directory exists"
-            ls -lah src/CutTheRopeDX.Browser/bin/Release/net10.0/browser/publish/wwwroot/ | head -20
+          WEB_ROOT=$(find ./web-publish -type d -name "wwwroot" | head -1)
+          if [ -d "$WEB_ROOT" ]; then
+            echo "✓ Web build output found at: $WEB_ROOT"
+            echo "✓ Contents:"
+            ls -lah "$WEB_ROOT" | head -20
           else
             echo "✗ Web build output directory not found"
             exit 1
